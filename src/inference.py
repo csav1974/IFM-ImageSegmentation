@@ -17,7 +17,6 @@ Configuration:
 - PATCH_SIZE: Size of image patches for model input.
 - class_colors: Dictionary mapping class indices to BGR colors for mask overlays.
 - alpha: Opacity of mask overlays.
-- gamma: Brightness adjustment for overlays (not used by default).
 
 Dependencies:
 - ultralytics (YOLO)
@@ -29,6 +28,8 @@ Usage:
 - Configure paths and parameters as needed.
 - Run the script to process all images and save results in the specified output directory.
 """
+
+
 from ultralytics import YOLO
 import cv2
 import numpy as np
