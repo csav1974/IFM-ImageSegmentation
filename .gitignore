@@ -1,0 +1,22 @@
+# Bytecode
+__pycache__/
+*.py[cod]
+
+# Pipenv and virtual env
+Pipfile.lock
+.venv/
+.env
+
+# Editor- and OS-Files
+.DS_Store
+*.swp
+
+# additional Folders
+data/*
+!data/.gitkeep
+models/*
+!models/.gitkeep
+!models/IFM_segmentation.pt
+output/*
+!output/.gitkeep
+.vscode/
