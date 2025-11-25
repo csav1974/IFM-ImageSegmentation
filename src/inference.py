@@ -43,11 +43,11 @@ from utils.results_to_JSON import save_segmentation_results_json
 MODEL_PATH = "models/IFM_segmentation.pt"
 # Lists of input images and corresponding XML measurement files
 IMAGE_PATHS = [
-    "data/20250813_A1-1_Glass/20250813_A1-1_U$3D.bmp"
+    "data/IFM_texture_cut.bmp"
     # Add more image paths here, e.g. "data/another/sample.bmp",
 ]
 XML_PATHS = [
-    "data/20250813_A1-1_Glass/info.xml",
+    "data/IFM_texture_cut_info.xml",
     # Add more XML paths here, ensuring the order matches IMAGE_PATHS
 ]
 # Path to output folder
@@ -62,105 +62,102 @@ class_colors = {
 }
 # Mask overlay opacity
 alpha = 0.7  # 0.0 = fully transparent, 1.0 = fully opaque
+max_size = 512  # size for printed mask
 
 
+def run_image_segmentation(image_path, xml_path, model_path, output_path, patch_size):
+    model = YOLO(model_path)
+    # Load the original image
+    original = cv2.imread(image_path)
+    if original is None:
+        raise ValueError(f"Could not load image from {image_path}")
 
-def main():
-    # Ensure image and XML lists align
-    if len(IMAGE_PATHS) != len(XML_PATHS):
-        raise ValueError("IMAGE_PATHS and XML_PATHS must have the same number of entries")
+    height, width = original.shape[:2]
+    annotated = original.copy()
+    all_results = []
 
-    # Load the segmentation model once
-    model = YOLO(MODEL_PATH)
+    # Process in fixed-size patches
+    for y in range(0, height, patch_size):
+        for x in range(0, width, patch_size):
+            y_end = min(y + patch_size, height)
+            x_end = min(x + patch_size, width)
+            patch = original[y:y_end, x:x_end]
 
-    # Process each image and its corresponding XML
-    for image_path, xml_path in zip(IMAGE_PATHS, XML_PATHS):
-        # Load the original image
-        original = cv2.imread(image_path)
-        if original is None:
-            raise ValueError(f"Could not load image from {image_path}")
+            # Pad if needed
+            ph, pw = patch.shape[:2]
+            if ph < patch_size or pw < patch_size:
+                padded = np.zeros((patch_size, patch_size, 3), dtype=patch.dtype)
+                padded[:ph, :pw] = patch
+            else:
+                padded = patch
 
-        height, width = original.shape[:2]
-        annotated = original.copy()
-        all_results = []
+            # Model prediction
+            results = model.predict(
+                padded,
+                imgsz=patch_size,
+                augment=False,
+                conf=0.4,
+                iou=0.3,
+                )
+            
+            result = results[0]
 
-        # Process in fixed-size patches
-        for y in range(0, height, PATCH_SIZE):
-            for x in range(0, width, PATCH_SIZE):
-                y_end = min(y + PATCH_SIZE, height)
-                x_end = min(x + PATCH_SIZE, width)
-                patch = original[y:y_end, x:x_end]
+            # Absolute bounding boxes and centroids
+            boxes = result.boxes.xyxy
+            boxes_np = boxes.cpu().numpy() if hasattr(boxes, 'cpu') else boxes
+            offset = np.array([x, y, x, y])
+            abs_boxes = boxes_np + offset[None, :]
 
-                # Pad if needed
-                ph, pw = patch.shape[:2]
-                if ph < PATCH_SIZE or pw < PATCH_SIZE:
-                    padded = np.zeros((PATCH_SIZE, PATCH_SIZE, 3), dtype=patch.dtype)
-                    padded[:ph, :pw] = patch
-                else:
-                    padded = patch
+            abs_centroids = np.array([((bb[0] + bb[2]) / 2, (bb[1] + bb[3]) / 2) for bb in abs_boxes])
+            result.abs_boxes = abs_boxes
+            result.abs_centroids = abs_centroids
 
-                # Model prediction
-                results = model.predict(
-                    padded,
-                    imgsz=PATCH_SIZE,
-                    augment=False,
-                    conf=0.4,
-                    iou=0.3,
-                    )
-                
-                result = results[0]
+            all_results.append(result)
 
-                # Absolute bounding boxes and centroids
-                boxes = result.boxes.xyxy
-                boxes_np = boxes.cpu().numpy() if hasattr(boxes, 'cpu') else boxes
-                offset = np.array([x, y, x, y])
-                abs_boxes = boxes_np + offset[None, :]
+            # Overlay masks if present
+            masks_data = getattr(result.masks, 'data', None)
+            if masks_data is None:
+                continue
+            masks = masks_data.cpu().numpy() if hasattr(masks_data, 'cpu') else masks_data
+            cls_ids = result.boxes.cls.cpu().numpy().astype(int) if hasattr(result.boxes.cls, 'cpu') else result.boxes.cls.astype(int)
 
-                abs_centroids = np.array([((bb[0] + bb[2]) / 2, (bb[1] + bb[3]) / 2) for bb in abs_boxes])
-                result.abs_boxes = abs_boxes
-                result.abs_centroids = abs_centroids
+            overlay = padded.copy()
+            for mask, cls in zip(masks, cls_ids):
+                mask = mask > 0.5
+                color = class_colors.get(cls, (255, 255, 255))
+                overlay_mask = overlay.copy()
+                overlay_mask[mask] = color
+                overlay = cv2.addWeighted(overlay, 1 - alpha, overlay_mask, alpha, 0)
 
-                all_results.append(result)
+            # Place annotated patch back
+            annotated[y:y_end, x:x_end] = overlay[:ph, :pw]
+    
+    # Prepare output paths
+    sample_name, _ = os.path.splitext(os.path.basename(image_path))
+    # sample_output_folder = os.path.join(output_path, sample_name)
+    os.makedirs(output_path, exist_ok=True)
 
-                # Overlay masks if present
-                masks_data = getattr(result.masks, 'data', None)
-                if masks_data is None:
-                    continue
-                masks = masks_data.cpu().numpy() if hasattr(masks_data, 'cpu') else masks_data
-                cls_ids = result.boxes.cls.cpu().numpy().astype(int) if hasattr(result.boxes.cls, 'cpu') else result.boxes.cls.astype(int)
+    result_image_path = os.path.join(output_path, f"{sample_name}_prediction.png")
+    result_csv_path = os.path.join(output_path, f"{sample_name}_prediction.csv")
+    result_json_path = os.path.join(output_path, f"{sample_name}_prediction.json")
 
-                overlay = padded.copy()
-                for mask, cls in zip(masks, cls_ids):
-                    mask = mask > 0.5
-                    color = class_colors.get(cls, (255, 255, 255))
-                    overlay_mask = overlay.copy()
-                    overlay_mask[mask] = color
-                    overlay = cv2.addWeighted(overlay, 1 - alpha, overlay_mask, alpha, 0)
+    # Save annotated image
+    if not cv2.imwrite(result_image_path, annotated):
+        raise IOError(f"Could not save segmented image to {result_image_path}")
 
-                # Place annotated patch back
-                annotated[y:y_end, x:x_end] = overlay[:ph, :pw]
+    # Save CSV and JSON results
+    if not save_segmentation_results(results=all_results, names=model.names, csv_path=result_csv_path, xml_path=xml_path):
+        raise IOError(f"Could not save CSV results to {result_csv_path}")
+    if not save_segmentation_results_json(results=all_results, names=model.names, json_path=result_json_path, xml_path=xml_path):
+        raise IOError(f"Could not save JSON results to {result_json_path}")
 
-        # Prepare output paths
-        sample_name, _ = os.path.splitext(os.path.basename(image_path))
-        sample_output_folder = os.path.join(OUTPUT_PATH, sample_name)
-        os.makedirs(sample_output_folder, exist_ok=True)
-
-        result_image_path = os.path.join(sample_output_folder, f"{sample_name}.png")
-        result_csv_path = os.path.join(sample_output_folder, f"{sample_name}.csv")
-        result_json_path = os.path.join(sample_output_folder, f"{sample_name}.json")
-
-        # Save annotated image
-        if not cv2.imwrite(result_image_path, annotated):
-            raise IOError(f"Could not save segmented image to {result_image_path}")
-
-        # Save CSV and JSON results
-        if not save_segmentation_results(results=all_results, names=model.names, csv_path=result_csv_path, xml_path=xml_path):
-            raise IOError(f"Could not save CSV results to {result_csv_path}")
-        if not save_segmentation_results_json(results=all_results, names=model.names, json_path=result_json_path, xml_path=xml_path):
-            raise IOError(f"Could not save JSON results to {result_json_path}")
-
-        print(f"Processed '{image_path}', results saved in '{sample_output_folder}'")
+    print(f"Processed '{image_path}', results saved in '{output_path}'")
 
 
 if __name__ == "__main__":
-    main()
+    # Ensure image and XML lists align
+    if len(IMAGE_PATHS) != len(XML_PATHS):
+        raise ValueError("IMAGE_PATHS and XML_PATHS must have the same number of entries")
+    
+    for image_path, xml_path in zip(IMAGE_PATHS, XML_PATHS):
+        run_image_segmentation(image_path=image_path, xml_path=xml_path, model_path=MODEL_PATH, output_path=OUTPUT_PATH, patch_size=PATCH_SIZE)
