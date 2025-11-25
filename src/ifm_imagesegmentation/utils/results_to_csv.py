@@ -1,5 +1,5 @@
 import pandas as pd
-from utils.pixelToRealWorld import calculate_pixels_per_mm, pixel_to_square_mm
+from ifm_imagesegmentation.utils.pixelToRealWorld import calculate_pixels_per_mm, pixel_to_square_mm
 
 def save_segmentation_results(results, names, csv_path, xml_path=None, pixel_size=None):
     """
