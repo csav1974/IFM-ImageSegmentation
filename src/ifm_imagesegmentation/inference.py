@@ -34,8 +34,8 @@ from ultralytics import YOLO
 import cv2
 import numpy as np
 import os
-from utils.results_to_csv import save_segmentation_results
-from utils.results_to_JSON import save_segmentation_results_json
+from ifm_imagesegmentation.utils.results_to_csv import save_segmentation_results
+from ifm_imagesegmentation.utils.results_to_JSON import save_segmentation_results_json
 
 # ----------------------------
 # Configuration (change as needed)
