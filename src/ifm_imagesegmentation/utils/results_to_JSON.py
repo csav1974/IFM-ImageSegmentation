@@ -2,21 +2,31 @@ import json
 import pandas as pd
 from utils.pixelToRealWorld import calculate_pixels_per_mm, pixel_to_square_mm
 
-def save_segmentation_results_json(results, names, json_path, xml_path):
+def save_segmentation_results_json(results, names, json_path, xml_path=None, pixel_size=None):
     """
     Save detailed segmentation results from an Ultralytics model to a JSON file,
     including pixel areas, converted mm² values, and absolute positions (bbox + centroid).
+    Either xml_path or pixel_size should be provided. If both are provided,
+    xml_path is used for calculations
 
     Args:
         results (list): List of Ultralytics Results objects, each with `abs_boxes` and `abs_centroids` attributes.
         names (dict): Mapping from class IDs to class names (model.names).
         json_path (str): Path where the JSON file will be saved.
-        xml_path (str): Path to the Alicona/IFM XML file for pixel-to-mm calibration.
+        xml_path (str) (optional): Path to the Alicona/IFM XML file for pixel-to-mm calibration.
+        pixel_size (float) (optional): Pixel size in meters        
     Returns:
         bool: True if JSON was created successfully, False otherwise.
     """
-    # 1) Load calibration
-    px_per_mm = calculate_pixels_per_mm(xml_path)
+    # --- Load calibration ---
+    # Pixels per millimeter
+    if xml_path is None and pixel_size is None:
+        print(f"Error: no information on pixel size found")
+        return False
+    elif xml_path is not None:
+        px_per_mm = calculate_pixels_per_mm(xml_path)
+    else:
+        px_per_mm = 0.001 / pixel_size # type: ignore
     px_per_sq_mm = px_per_mm ** 2
 
     objects = []

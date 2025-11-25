@@ -1,23 +1,32 @@
 import pandas as pd
 from utils.pixelToRealWorld import calculate_pixels_per_mm, pixel_to_square_mm
 
-def save_segmentation_results(results, names, csv_path, xml_path):
+def save_segmentation_results(results, names, csv_path, xml_path=None, pixel_size=None):
     """
     Save segmentation results from an Ultralytics model to a CSV summary.
     Even if no instances are found, a CSV with all classes and 0 values will be created.
     Additionally converts pixel areas to square millimeters using IFM XML calibration.
+    Either xml_path or pixel_size should be provided. If both are provided,
+    xml_path is used for calculations
 
     Args:
         results (list): List of Ultralytics Results objects.
         names (dict): Mapping from class IDs to class names (model.names).
         csv_path (str): Path where the CSV summary will be saved.
-        xml_path (str): Path to the Alicona/IFM XML file for pixel-to-mm calibration.
+        xml_path (str) (optional): Path to the Alicona/IFM XML file for pixel-to-mm calibration.
+        pixel_size (float) (optional): Pixel size in meters
     Returns:
         bool: True if CSV was created successfully, False otherwise.
     """
     # --- Load calibration ---
     # Pixels per millimeter
-    px_per_mm = calculate_pixels_per_mm(xml_path)
+    if xml_path is None and pixel_size is None:
+        print(f"Error: no information on pixel size provided")
+        return False
+    elif xml_path is not None:
+        px_per_mm = calculate_pixels_per_mm(xml_path)
+    else:
+        px_per_mm = 0.001 / pixel_size # type: ignore
     # Pixels per square millimeter
     px_per_sq_mm = px_per_mm ** 2
 

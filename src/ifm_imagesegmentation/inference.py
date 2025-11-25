@@ -65,7 +65,7 @@ alpha = 0.7  # 0.0 = fully transparent, 1.0 = fully opaque
 max_size = 512  # size for printed mask
 
 
-def run_image_segmentation(image_path, xml_path, model_path, output_path, patch_size):
+def run_image_segmentation(image_path, model_path, output_path, patch_size, xml_path=None, pixel_size=None):
     model = YOLO(model_path)
     # Load the original image
     original = cv2.imread(image_path)
@@ -146,9 +146,9 @@ def run_image_segmentation(image_path, xml_path, model_path, output_path, patch_
         raise IOError(f"Could not save segmented image to {result_image_path}")
 
     # Save CSV and JSON results
-    if not save_segmentation_results(results=all_results, names=model.names, csv_path=result_csv_path, xml_path=xml_path):
+    if not save_segmentation_results(results=all_results, names=model.names, csv_path=result_csv_path, xml_path=xml_path, pixel_size=pixel_size):
         raise IOError(f"Could not save CSV results to {result_csv_path}")
-    if not save_segmentation_results_json(results=all_results, names=model.names, json_path=result_json_path, xml_path=xml_path):
+    if not save_segmentation_results_json(results=all_results, names=model.names, json_path=result_json_path, xml_path=xml_path, pixel_size=pixel_size):
         raise IOError(f"Could not save JSON results to {result_json_path}")
 
     print(f"Processed '{image_path}', results saved in '{output_path}'")
@@ -160,4 +160,4 @@ if __name__ == "__main__":
         raise ValueError("IMAGE_PATHS and XML_PATHS must have the same number of entries")
     
     for image_path, xml_path in zip(IMAGE_PATHS, XML_PATHS):
-        run_image_segmentation(image_path=image_path, xml_path=xml_path, model_path=MODEL_PATH, output_path=OUTPUT_PATH, patch_size=PATCH_SIZE)
+        run_image_segmentation(image_path=image_path, model_path=MODEL_PATH, output_path=OUTPUT_PATH, patch_size=PATCH_SIZE, xml_path=xml_path)
