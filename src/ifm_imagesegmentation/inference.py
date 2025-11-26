@@ -29,11 +29,11 @@ Usage:
 - Run the script to process all images and save results in the specified output directory.
 """
 
-
 from ultralytics import YOLO
 import cv2
 import numpy as np
 import os
+import h5py
 from ifm_imagesegmentation.utils.results_to_csv import save_segmentation_results
 from ifm_imagesegmentation.utils.results_to_JSON import save_segmentation_results_json
 
@@ -56,16 +56,50 @@ OUTPUT_PATH = "output"
 PATCH_SIZE = 640
 # Define a BGR color for each class index the model outputs.
 class_colors = {
-    0: (0,   0,   255),   # class 0 → red   (here Chipping)
-    1: (0,   255, 0  ),   # class 1 → green (here Scratching)
-    2: (255, 0,   0  ),   # class 2 → blue  (here Whiskers)
+    0: (0, 0, 255),  # class 0 → red   (here Chipping)
+    1: (0, 255, 0),  # class 1 → green (here Scratching)
+    2: (255, 0, 0),  # class 2 → blue  (here Whiskers)
 }
 # Mask overlay opacity
 alpha = 0.7  # 0.0 = fully transparent, 1.0 = fully opaque
 max_size = 512  # size for printed mask
 
 
-def run_image_segmentation(image_path, model_path, output_path, patch_size, xml_path=None, pixel_size=None):
+def run_image_segmentation(
+    image_path,
+    model_path,
+    output_path,
+    patch_size,
+    xml_path=None,
+    pixel_size=None,
+    save_json: bool = True,
+    save_png: bool = True,
+    save_h5: bool = False,
+):
+    """
+    Run image segmentation on a single image and save the results
+    Arguments:
+        image_path:
+            full path to the source image
+        model_path:
+            full path to the model parameters (.pt)
+        output_path:
+            path to the folder for output files
+        patch_size:
+            max size of image patches the image will be split into
+        xml_path:
+            path to xml file with metadata, used for extracting pixel size;
+            if `None`, uses pixel_size directly instead
+        pixel_size:
+            pixel size in meters; either this or xml_path must be provided
+        save_json:
+            save result as json file if `True` (each defect found listed)
+        save_png:
+            save result as png image if `True` (masked with defects found)
+        save_h5:
+            save result as h5 file if `True` (masks for each type of defect +
+            mask for the sample area)
+    """
     model = YOLO(model_path)
     # Load the original image
     original = cv2.imread(image_path)
@@ -75,6 +109,7 @@ def run_image_segmentation(image_path, model_path, output_path, patch_size, xml_
     height, width = original.shape[:2]
     annotated = original.copy()
     all_results = []
+    full_mask = np.zeros((len(class_colors) + 1, height, width), dtype=bool)
 
     # Process in fixed-size patches
     for y in range(0, height, patch_size):
@@ -98,28 +133,36 @@ def run_image_segmentation(image_path, model_path, output_path, patch_size, xml_
                 augment=False,
                 conf=0.4,
                 iou=0.3,
-                )
-            
+            )
+
             result = results[0]
 
             # Absolute bounding boxes and centroids
             boxes = result.boxes.xyxy
-            boxes_np = boxes.cpu().numpy() if hasattr(boxes, 'cpu') else boxes
+            boxes_np = boxes.cpu().numpy() if hasattr(boxes, "cpu") else boxes
             offset = np.array([x, y, x, y])
             abs_boxes = boxes_np + offset[None, :]
 
-            abs_centroids = np.array([((bb[0] + bb[2]) / 2, (bb[1] + bb[3]) / 2) for bb in abs_boxes])
+            abs_centroids = np.array(
+                [((bb[0] + bb[2]) / 2, (bb[1] + bb[3]) / 2) for bb in abs_boxes]
+            )
             result.abs_boxes = abs_boxes
             result.abs_centroids = abs_centroids
 
             all_results.append(result)
 
             # Overlay masks if present
-            masks_data = getattr(result.masks, 'data', None)
+            masks_data = getattr(result.masks, "data", None)
             if masks_data is None:
                 continue
-            masks = masks_data.cpu().numpy() if hasattr(masks_data, 'cpu') else masks_data
-            cls_ids = result.boxes.cls.cpu().numpy().astype(int) if hasattr(result.boxes.cls, 'cpu') else result.boxes.cls.astype(int)
+            masks = (
+                masks_data.cpu().numpy() if hasattr(masks_data, "cpu") else masks_data
+            )
+            cls_ids = (
+                result.boxes.cls.cpu().numpy().astype(int)
+                if hasattr(result.boxes.cls, "cpu")
+                else result.boxes.cls.astype(int)
+            )
 
             overlay = padded.copy()
             for mask, cls in zip(masks, cls_ids):
@@ -128,10 +171,13 @@ def run_image_segmentation(image_path, model_path, output_path, patch_size, xml_
                 overlay_mask = overlay.copy()
                 overlay_mask[mask] = color
                 overlay = cv2.addWeighted(overlay, 1 - alpha, overlay_mask, alpha, 0)
+                full_mask[cls, y:y_end, x:x_end] = (
+                    full_mask[cls, y:y_end, x:x_end] | mask[:ph, :pw]
+                )
 
             # Place annotated patch back
             annotated[y:y_end, x:x_end] = overlay[:ph, :pw]
-    
+
     # Prepare output paths
     sample_name, _ = os.path.splitext(os.path.basename(image_path))
     # sample_output_folder = os.path.join(output_path, sample_name)
@@ -140,16 +186,49 @@ def run_image_segmentation(image_path, model_path, output_path, patch_size, xml_
     result_image_path = os.path.join(output_path, f"{sample_name}_prediction.png")
     result_csv_path = os.path.join(output_path, f"{sample_name}_prediction.csv")
     result_json_path = os.path.join(output_path, f"{sample_name}_prediction.json")
+    result_mask_path = os.path.join(output_path, f"{sample_name}_prediction.h5")
 
     # Save annotated image
-    if not cv2.imwrite(result_image_path, annotated):
-        raise IOError(f"Could not save segmented image to {result_image_path}")
+    if save_png:
+        if not cv2.imwrite(result_image_path, annotated):
+            raise IOError(f"Could not save segmented image to {result_image_path}")
 
     # Save CSV and JSON results
-    if not save_segmentation_results(results=all_results, names=model.names, csv_path=result_csv_path, xml_path=xml_path, pixel_size=pixel_size):
+    if not save_segmentation_results(
+        results=all_results,
+        names=model.names,
+        csv_path=result_csv_path,
+        xml_path=xml_path,
+        pixel_size=pixel_size,
+    ):
         raise IOError(f"Could not save CSV results to {result_csv_path}")
-    if not save_segmentation_results_json(results=all_results, names=model.names, json_path=result_json_path, xml_path=xml_path, pixel_size=pixel_size):
-        raise IOError(f"Could not save JSON results to {result_json_path}")
+    if save_json:
+        if not save_segmentation_results_json(
+            results=all_results,
+            names=model.names,
+            json_path=result_json_path,
+            xml_path=xml_path,
+            pixel_size=pixel_size,
+        ):
+            raise IOError(f"Could not save JSON results to {result_json_path}")
+
+    if save_h5:
+        # Add sample outline
+        full_mask[-1] = np.any(original, axis=2)
+
+        # Save the mask as hdf5
+        try:
+            with h5py.File(result_mask_path, "w") as f:
+                f.create_dataset(
+                    "mask",
+                    data=full_mask,
+                    chunks=(1, height, width),
+                    compression="lzf",
+                    dtype="bool",
+                )
+                f["mask_layers"] = ["Chipping", "Scratching", "Whiskers", "Sample"]
+        except Exception as e:
+            raise IOError(f"Could not save the mask to {result_mask_path}: {e}")
 
     print(f"Processed '{image_path}', results saved in '{output_path}'")
 
@@ -157,7 +236,15 @@ def run_image_segmentation(image_path, model_path, output_path, patch_size, xml_
 if __name__ == "__main__":
     # Ensure image and XML lists align
     if len(IMAGE_PATHS) != len(XML_PATHS):
-        raise ValueError("IMAGE_PATHS and XML_PATHS must have the same number of entries")
-    
+        raise ValueError(
+            "IMAGE_PATHS and XML_PATHS must have the same number of entries"
+        )
+
     for image_path, xml_path in zip(IMAGE_PATHS, XML_PATHS):
-        run_image_segmentation(image_path=image_path, model_path=MODEL_PATH, output_path=OUTPUT_PATH, patch_size=PATCH_SIZE, xml_path=xml_path)
+        run_image_segmentation(
+            image_path=image_path,
+            model_path=MODEL_PATH,
+            output_path=OUTPUT_PATH,
+            patch_size=PATCH_SIZE,
+            xml_path=xml_path,
+        )
