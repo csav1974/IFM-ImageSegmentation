@@ -31,3 +31,6 @@ dev = [
 
 [project.urls]
 Repository = "https://github.com/csav1974/IFM-ImageSegmentation"
+
+[tool.setuptools.packages.find]
+where = ["src"]
