@@ -7,7 +7,7 @@ name = "ifm-imagesegmentation"
 version = "0.1.0"
 description = "IFM image segmentation script utilizing YOLO ultralytics model"
 authors = [
-    { name = "Your Name", email = "youremail@example.com" }
+    { name = "Georg Kuen", email = "georg.kuen@uibk.ac.at" }
 ]
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
