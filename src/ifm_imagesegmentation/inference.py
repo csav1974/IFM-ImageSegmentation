@@ -110,6 +110,8 @@ def run_image_segmentation(
     annotated = original.copy()
     all_results = []
     full_mask = np.zeros((len(class_colors) + 1, height, width), dtype=bool)
+    # Add sample outline
+    full_mask[-1] = np.any(original, axis=2)
 
     # Process in fixed-size patches
     for y in range(0, height, patch_size):
@@ -194,7 +196,9 @@ def run_image_segmentation(
             raise IOError(f"Could not save segmented image to {result_image_path}")
 
     # Save CSV and JSON results
+    counts_from_mask = np.sum(full_mask, axis=(1, 2))
     if not save_segmentation_results(
+        counts_from_mask=counts_from_mask,
         results=all_results,
         names=model.names,
         csv_path=result_csv_path,
@@ -213,9 +217,6 @@ def run_image_segmentation(
             raise IOError(f"Could not save JSON results to {result_json_path}")
 
     if save_h5:
-        # Add sample outline
-        full_mask[-1] = np.any(original, axis=2)
-
         # Save the mask as hdf5
         try:
             with h5py.File(result_mask_path, "w") as f:
