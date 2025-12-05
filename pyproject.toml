@@ -19,18 +19,12 @@ dependencies = [
     "matplotlib>=3.2.0",
     "pandas>=1.1.0",
     "scikit-learn>=0.24.0",
-    "jupyter>=1.0.0"
+    "jupyter>=1.0.0",
+    "opencv-python>=4.5.0"
 ]
 
 [project.optional-dependencies]
-opencv = [
-    "opencv-python>=4.5.0"
-]
-opencv-headless = [
-    "opencv-python-headless>=4.5.0"
-]
 dev = [
-    "ifm-imagesegmentation[opencv]",
     "pytest>=7.0.0",
     "ruff>=0.0.0"
 ]
